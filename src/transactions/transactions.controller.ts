@@ -9,6 +9,7 @@ export class TransactionsController {
 
   @Post('create')
   create(@Body() createTransactionDto: any) {
+    createTransactionDto.status = "success"
     return this.transactionsService.create(createTransactionDto);
   }
 
