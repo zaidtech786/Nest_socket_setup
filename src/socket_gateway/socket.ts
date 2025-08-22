@@ -86,6 +86,11 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
 //   return { message: `Watching transaction ${data.txnId} for 5 minutes` };
 // } 
 
+@SubscribeMessage('reconnectFailed')
+handleReconnectFailed(@ConnectedSocket() client: Socket) {
+  console.error(`❌ Client ${client.id} failed to reconnect`);
+}
+
 
 @SubscribeMessage('joinRoom')
 async handleJoinRoom(
@@ -97,36 +102,34 @@ async handleJoinRoom(
 
   console.log(`User ${data.userId} joined room ${roomName}`);
 
-  const timeout = setTimeout(() => {
-    console.log(`⏳ 5 minutes passed. Closing watcher and socket for txnId ${data.txnId}`);
-    changeStream.close();
-    client.leave(roomName);
-    client.disconnect(true);
-  }, 5 * 60 * 1000);
+  // const timeout = setTimeout(() => {
+  //   console.log(`⏳ 5 minutes passed. Closing watcher and socket for txnId ${data.txnId}`);
+  //   changeStream.close();
+  //   client.leave(roomName);
+  //   client.disconnect(true);
+  // }, 5 * 60 * 1000);
 
-  // 1️⃣ Send the latest state from DB immediately
-  const txn = await this.transModel.findOne({ txnId: data.txnId }).lean();
-  if (txn) {
-    client.emit("paymentUpdate", {
-      txnId: txn.txnId,
-      status: txn.status,
-    });
+  // const txn = await this.transModel.findOne({ txnId: data.txnId }).lean();
+  // if (txn) {
+  //   client.emit("paymentUpdate", {
+  //     txnId: txn.txnId,
+  //     status: txn.status,
+  //   });
 
-    if (['success', 'failed'].includes(txn.status)) {
-      this.activeWatchers.delete(data.txnId);
-      clearTimeout(timeout); // stop timer
-      client.leave(roomName);
-      client.disconnect();
-    }
-    console.log(`Sent latest status of txnId ${txn.txnId}: ${txn.status}`);
-  }
+  //   if (['success', 'failed'].includes(txn.status)) {
+  //     this.activeWatchers.delete(data.txnId);
+  //     // clearTimeout(timeout); 
+  //     client.leave(roomName);
+  //     client.disconnect();
+  //   }
+  //   console.log(`Sent latest status of txnId ${txn.txnId}: ${txn.status}`);
+  // }
 
-  // 2️⃣ Reuse existing watcher if present
   if (this.activeWatchers.has(data.txnId)) {
     return { message: `Rejoined transaction ${data.txnId}` };
   }
 
-  // 3️⃣ Otherwise, create a watcher
+
   const changeStream = this.transModel.watch(
     [{ $match: { 'fullDocument.txnId': data.txnId } }],
     { fullDocument: 'updateLookup' }
@@ -139,19 +142,20 @@ async handleJoinRoom(
     if (!fullDoc) return;
 
     this.server.to(roomName).emit('paymentUpdate', {
-      txnId: fullDoc.txnId,
-      status: fullDoc.status,
+  txnId: fullDoc.txnId,
+  status: fullDoc.status,
+  createdAt: fullDoc.createdAt,      
     });
 
     console.log(`Live update txnId ${fullDoc.txnId}: ${fullDoc.status}`);
 
-    if (['success', 'failed'].includes(fullDoc.status)) {
-      this.activeWatchers.delete(data.txnId);
-      clearTimeout(timeout); // stop timer
-      changeStream.close();
-      client.leave(roomName);
-      client.disconnect();
-    }
+    // if (['success', 'failed'].includes(fullDoc.status)) {
+    //   this.activeWatchers.delete(data.txnId);
+    //   clearTimeout(timeout); 
+    //   changeStream.close();
+    //   client.leave(roomName);
+    //   client.disconnect();
+    // }
   });
 
   changeStream.on('close', () => {
